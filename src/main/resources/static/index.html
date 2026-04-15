@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <title>Hệ Thống Tư Vấn Y Tế - DC6 & DC7</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+
+    <style>
+        /* Tùy chỉnh thanh cuộn cho UI mượt mà */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .glass-effect { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex items-center justify-center bg-cover bg-center"
+      style="background-image: url('https://images.unsplash.com/photo-1538108149393-ceefbda5224c?q=80&w=2000&auto=format&fit=crop');">
+
+<div class="absolute inset-0 bg-blue-900/60 backdrop-blur-sm"></div>
+
+<div class="relative z-10 w-full max-w-5xl h-[85vh] flex glass-effect rounded-2xl shadow-2xl overflow-hidden mx-4">
+
+    <div class="hidden md:flex w-2/5 bg-blue-600 text-white flex-col justify-between p-8 relative overflow-hidden">
+        <div class="absolute inset-0 opacity-20 bg-[url('https://images.unsplash.com/photo-1579684385127-1ef15d508118?q=80&w=1000&auto=format&fit=crop')] bg-cover bg-center"></div>
+        <div class="relative z-10">
+            <h1 class="text-3xl font-bold mb-2"><i class="fa-solid fa-heart-pulse mr-2"></i>MediCare</h1>
+            <p class="text-blue-100 text-sm">Hệ thống tư vấn y tế trực tuyến 24/7. Được hỗ trợ bởi công nghệ AI Voice-to-Text.</p>
+        </div>
+        <div class="relative z-10">
+            <div class="bg-white/20 p-4 rounded-xl backdrop-blur-md">
+                <h3 class="font-semibold mb-1"><i class="fa-solid fa-user-doctor mr-2"></i>Bác sĩ phụ trách</h3>
+                <p class="text-sm">TS.BS Nguyễn Văn A</p>
+                <p class="text-xs text-blue-200 mt-1">Chuyên khoa: Nội tổng quát</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="flex-1 flex flex-col bg-gray-50 relative">
+        <div class="bg-white border-b border-gray-200 p-4 flex justify-between items-center shadow-sm z-10">
+            <div>
+                <h2 class="text-lg font-bold text-gray-800">Phòng Tư Vấn 01</h2>
+                <div class="flex items-center text-xs mt-1" id="statusContainer">
+                    <span class="w-2 h-2 rounded-full bg-yellow-500 mr-2" id="statusDot"></span>
+                    <span id="statusText" class="text-gray-500">Đang kết nối...</span>
+                </div>
+            </div>
+            <button class="text-gray-400 hover:text-gray-600 transition"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+        </div>
+
+        <div id="messageList" class="flex-1 p-4 overflow-y-auto flex flex-col gap-4">
+        </div>
+
+        <div id="voiceStatus" class="absolute bottom-20 left-4 text-xs text-blue-600 font-semibold hidden bg-blue-50 px-3 py-1 rounded-full shadow-sm border border-blue-100">
+            <i class="fa-solid fa-microphone-lines animate-pulse mr-1"></i> Đang nghe...
+        </div>
+
+        <div class="bg-white p-4 border-t border-gray-200 flex items-center gap-2">
+            <button id="btnVoice" class="w-10 h-10 rounded-full bg-gray-100 text-gray-600 hover:bg-red-50 hover:text-red-500 transition-colors flex items-center justify-center shadow-sm group" title="Nhấn để nói (Voice to Text)">
+                <i class="fa-solid fa-microphone group-hover:scale-110 transition-transform"></i>
+            </button>
+
+            <input type="text" id="messageInput" class="flex-1 bg-gray-100 border-transparent focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 rounded-full px-4 py-2 text-sm outline-none transition-all" placeholder="Nhập triệu chứng của bạn...">
+
+            <button onclick="sendMessage()" class="w-10 h-10 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-colors flex items-center justify-center shadow-md">
+                <i class="fa-solid fa-paper-plane"></i>
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Sinh ID ngẫu nhiên từ 1 đến 1000 mỗi khi mở tab mới
+const MY_USER_ID = Math.floor(Math.random() * 1000) + 1;
+    var stompClient = null;
+
+    // 1. KẾT NỐI WEBSOCKET
+    function connect() {
+        var socket = new SockJS('/ws-medical');
+        stompClient = Stomp.over(socket);
+
+        // Tắt log StompJS cho console đỡ rối
+        stompClient.debug = null;
+
+        stompClient.connect({}, function () {
+            // Cập nhật UI trạng thái
+            document.getElementById('statusDot').className = "w-2 h-2 rounded-full bg-green-500 mr-2 animate-pulse";
+            document.getElementById('statusText').innerText = "Đã kết nối Server";
+            document.getElementById('statusText').className = "text-green-600 font-medium";
+
+            stompClient.subscribe('/group/room_01', function (response) {
+                var msg = JSON.parse(response.body);
+                displayMessage(msg);
+            });
+        }, function(error) {
+            document.getElementById('statusDot').className = "w-2 h-2 rounded-full bg-red-500 mr-2";
+            document.getElementById('statusText').innerText = "Mất kết nối";
+        });
+    }
+
+    // 2. GỬI TIN NHẮN
+    function sendMessage() {
+        var input = document.getElementById('messageInput');
+        var content = input.value;
+        if(!content.trim()) return;
+
+        var messageData = { content: content, senderId: MY_USER_ID };
+        stompClient.send("/app/chat/room_01", {}, JSON.stringify(messageData));
+        input.value = '';
+        input.focus();
+    }
+
+    // Cập nhật UI: Nhấn Enter để gửi
+    document.getElementById('messageInput').addEventListener('keypress', function (e) {
+        if (e.key === 'Enter') sendMessage();
+    });
+
+    // 3. VOICE TO TEXT
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'vi-VN';
+        const voiceStatus = document.getElementById('voiceStatus');
+        const btnVoice = document.getElementById('btnVoice');
+
+        btnVoice.onclick = () => {
+            recognition.start();
+            voiceStatus.classList.remove('hidden');
+            btnVoice.classList.add('bg-red-100', 'text-red-600', 'animate-pulse');
+        };
+
+        recognition.onresult = (event) => {
+            const text = event.results[0][0].transcript;
+            document.getElementById('messageInput').value = text;
+            voiceStatus.classList.add('hidden');
+            btnVoice.classList.remove('bg-red-100', 'text-red-600', 'animate-pulse');
+
+            // Trễ 0.5s cho user kịp nhìn chữ rồi gửi
+            setTimeout(sendMessage, 500);
+        };
+
+        recognition.onerror = () => {
+            voiceStatus.classList.add('hidden');
+            btnVoice.classList.remove('bg-red-100', 'text-red-600', 'animate-pulse');
+            alert('Không thể nhận diện giọng nói. Vui lòng thử lại!');
+        };
+    } else {
+        document.getElementById('btnVoice').style.display = 'none';
+    }
+
+    // 4. HIỂN THỊ TIN NHẮN (UI CHAT BUBBLES)
+    function displayMessage(msg) {
+        var isMe = (msg.senderId === MY_USER_ID);
+        var list = document.getElementById('messageList');
+        var div = document.createElement('div');
+
+        // Xử lý logic hiển thị tin nhắn của mình nằm bên phải, người khác bên trái
+        if (isMe) {
+            div.className = "flex w-full justify-end";
+            div.innerHTML = `
+                <div class="max-w-[75%] flex flex-col items-end">
+                    <span class="text-[10px] text-gray-400 mb-1 mr-1">Bạn</span>
+                    <div class="bg-blue-600 text-white px-4 py-2 rounded-2xl rounded-tr-sm shadow-sm text-sm">
+                        ${msg.content}
+                    </div>
+                </div>
+            `;
+        } else {
+            div.className = "flex w-full justify-start";
+            div.innerHTML = `
+                <div class="max-w-[75%] flex flex-col items-start">
+                    <span class="text-[10px] text-gray-400 mb-1 ml-1">Bác sĩ (ID: ${msg.senderId})</span>
+                    <div class="bg-white border border-gray-200 text-gray-800 px-4 py-2 rounded-2xl rounded-tl-sm shadow-sm text-sm">
+                        ${msg.content}
+                    </div>
+                </div>
+            `;
+        }
+
+        list.appendChild(div);
+        // Auto cuộn xuống tin nhắn mới nhất
+        list.scrollTop = list.scrollHeight;
+    }
+
+    // Khởi động kết nối
+    connect();
+</script>
+</body>
+</html>
